@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>自定义开关控制 | myaaa项目</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+        }
+        body {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            padding: 40px 30px;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            text-align: center;
+            width: 100%;
+            max-width: 350px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            font-weight: 600;
+            font-size: 1.8rem;
+        }
+        .status-text {
+            color: #666;
+            margin-bottom: 25px;
+            font-size: 1.1rem;
+        }
+        /* 自定义开关样式 */
+        .switch-wrapper {
+            position: relative;
+            display: inline-block;
+            width: 120px;
+            height: 60px;
+            margin: 20px 0;
+        }
+        .switch-wrapper input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #e0e0e0;
+            transition: .4s;
+            border-radius: 60px;
+            box-shadow: inset 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 52px;
+            width: 52px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        input:checked + .slider {
+            background-color: #4cd964;
+        }
+        input:checked + .slider:before {
+            transform: translateX(60px);
+        }
+        .connection-status {
+            margin-top: 25px;
+            font-size: 0.9rem;
+            color: #888;
+        }
+        .status-online {
+            color: #4cd964;
+        }
+        .status-offline {
+            color: #ff3b30;
+        }
+        .api-status {
+            margin-top: 15px;
+            font-size: 0.8rem;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>设备开关控制</h1>
+        <p class="status-text">当前状态：<span id="current-state">未知</span></p>
+        
+        <label class="switch-wrapper">
+            <input type="checkbox" id="device-switch">
+            <span class="slider"></span>
+        </label>
+        
+        <p class="connection-status">
+            WebSocket 状态：<span id="ws-status" class="status-offline">未连接</span>
+        </p>
+        <p class="api-status">
+            HTTP API 拉取状态：<span id="api-status">未开始</span>
+        </p>
+    </div>
+
+    <script>
+        // MixIO 配置
+        const MIXIO_WS_URL = 'ws://mixio.mixly.cn:8083'; // WebSocket 地址
+        const MIXIO_API_URL = 'https://mixio.mixly.cn/api/v1/getData'; // HTTP API 地址
+        const USER = '3027065581@qq.com';
+        const PASSWORD = 'ae87fd22b6e7a085d027d4694de1f387';
+        const PROJECT = 'myaaa';
+        const TOPIC = 'button';
+
+        // DOM 元素
+        const switchEl = document.getElementById('device-switch');
+        const stateText = document.getElementById('current-state');
+        const wsStatusEl = document.getElementById('ws-status');
+        const apiStatusEl = document.getElementById('api-status');
+
+        // WebSocket 连接
+        let ws;
+
+        // 初始化 WebSocket 连接
+        function connectWebSocket() {
+            if (ws) ws.close();
+            ws = new WebSocket(MIXIO_WS_URL);
+
+            ws.onopen = () => {
+                console.log('WebSocket 已连接');
+                wsStatusEl.textContent = '已连接';
+                wsStatusEl.className = 'status-online';
+            };
+
+            ws.onmessage = (event) => {
+                const message = event.data.trim();
+                console.log('WebSocket 收到消息：', message);
+                updateSwitchState(message);
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket 已断开');
+                wsStatusEl.textContent = '已断开（尝试重连）';
+                wsStatusEl.className = 'status-offline';
+                setTimeout(connectWebSocket, 3000);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket 错误：', error);
+                wsStatusEl.textContent = '连接错误';
+                wsStatusEl.className = 'status-offline';
+            };
+        }
+
+        // 发送控制指令（WebSocket）
+        function sendCommandViaWS(state) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const command = state ? '1' : '0';
+                ws.send(command);
+                console.log('WebSocket 发送指令：', command);
+            } else {
+                alert('WebSocket 未连接，请稍后重试');
+                // 尝试 HTTP API 发送（可选，若 API 支持发送）
+                // sendCommandViaAPI(state);
+            }
+        }
+
+        // HTTP API 获取数据
+        function fetchDataViaAPI() {
+            const url = `${MIXIO_API_URL}?user=${USER}&password=${PASSWORD}&project=${PROJECT}&topic=${TOPIC}&num=1`;
+            fetch(url)
+                .then(response => {
+                    if (!response.ok) throw new Error('API 请求失败');
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('HTTP API 拉取数据：', data);
+                    apiStatusEl.textContent = '拉取成功';
+                    // 假设返回数据中有 message 字段对应主题消息
+                    if (data && data.message) {
+                        updateSwitchState(data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('HTTP API 错误：', error);
+                    apiStatusEl.textContent = '拉取失败';
+                });
+        }
+
+        // 更新开关状态
+        function updateSwitchState(message) {
+            const isOn = message === '1';
+            switchEl.checked = isOn;
+            stateText.textContent = isOn ? '开启' : '关闭';
+        }
+
+        // 绑定开关事件（优先用 WebSocket 发送）
+        switchEl.addEventListener('change', (e) => {
+            sendCommandViaWS(e.target.checked);
+        });
+
+        // 初始连接 WebSocket
+        connectWebSocket();
+
+        // 定时拉取 HTTP API（每 10 秒一次）
+        setInterval(fetchDataViaAPI, 10000);
+        // 页面加载后立即拉取一次
+        fetchDataViaAPI();
+    </script>
+</body>
+</html>
